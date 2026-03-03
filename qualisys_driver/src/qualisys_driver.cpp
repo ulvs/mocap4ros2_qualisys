@@ -26,6 +26,7 @@
 #include <utility>
 #include "qualisys_driver/qualisys_driver.hpp"
 #include "lifecycle_msgs/msg/state.hpp"
+#include "geometry_msgs/msg/transform_stamped.hpp"
 #include <iostream>
 #include <cmath>
 
@@ -79,7 +80,13 @@ void QualisysDriver::loop()
 {
   CRTPacket * prt_packet = port_protocol_.GetRTPacket();
   CRTPacket::EPacketType e_type;
-  port_protocol_.GetCurrentFrame(CRTProtocol::cComponent3d + CRTProtocol::cComponent6d);
+  unsigned int components = CRTProtocol::cComponent3d + CRTProtocol::cComponent6d;
+  if (enable_skeleton_ && skeleton_data_available_) {
+    components += CRTProtocol::cComponentSkeleton;
+  }
+  CRTProtocol::SComponentOptions options;
+  options.mSkeletonGlobalData = true;
+  port_protocol_.GetCurrentFrame(components, options);
   if (port_protocol_.ReceiveRTPacket(e_type, true)) {
     switch (e_type) {
       case CRTPacket::PacketError:
@@ -125,7 +132,10 @@ void QualisysDriver::process_packet(CRTPacket * const packet)
   }
   last_frame_number_ = frame_number;
 
-  if (!mocap_markers_pub_->is_activated() && !mocap_rigid_bodies_pub_->is_activated() ) {
+  if (!mocap_markers_pub_->is_activated() &&
+      !mocap_rigid_bodies_pub_->is_activated() &&
+      !mocap_skeleton_pub_->is_activated())
+  {
     return;
   }
 
@@ -182,6 +192,90 @@ void QualisysDriver::process_packet(CRTPacket * const packet)
 
     mocap_rigid_bodies_pub_->publish(msg_rb);
   }
+
+  // Process skeleton data (always process for TF, publish message only if subscribers)
+  if (enable_skeleton_ && skeleton_data_available_) {
+    unsigned int skeleton_count = packet->GetSkeletonCount();
+
+    if (skeleton_count > 0) {
+      mocap4r2_msgs::msg::RigidBodies msg_skel;
+      msg_skel.header.frame_id = frame_id_;
+      msg_skel.header.stamp = rclcpp::Clock().now();
+      msg_skel.frame_number = frame_number;
+
+      geometry_msgs::msg::PoseArray pose_array;
+      pose_array.header = msg_skel.header;
+
+      for (unsigned int skel_idx = 0; skel_idx < skeleton_count; ++skel_idx) {
+        unsigned int segment_count = packet->GetSkeletonSegmentCount(skel_idx);
+
+        for (unsigned int seg_idx = 0; seg_idx < segment_count; ++seg_idx) {
+          CRTPacket::SSkeletonSegment segment;
+          if (packet->GetSkeletonSegment(skel_idx, seg_idx, segment)) {
+            mocap4r2_msgs::msg::RigidBody rb;
+
+            // Look up segment name from settings
+            auto key = std::make_pair(skel_idx, segment.id);
+            auto it = skeleton_segment_map_.find(key);
+            if (it != skeleton_segment_map_.end()) {
+              rb.rigid_body_name = it->second.skeleton_name + "/" + it->second.segment_name;
+            } else {
+              rb.rigid_body_name = "skeleton_" + std::to_string(skel_idx) +
+                "/segment_" + std::to_string(segment.id);
+            }
+
+            // Position (convert mm to m)
+            rb.pose.position.x = segment.positionX / 1000.0;
+            rb.pose.position.y = segment.positionY / 1000.0;
+            rb.pose.position.z = segment.positionZ / 1000.0;
+
+            // Rotation (already quaternion from SDK)
+            rb.pose.orientation.x = segment.rotationX;
+            rb.pose.orientation.y = segment.rotationY;
+            rb.pose.orientation.z = segment.rotationZ;
+            rb.pose.orientation.w = segment.rotationW;
+
+            // Skip invalid segments (NaN check for position and orientation)
+            bool valid_position = !std::isnan(rb.pose.position.x) &&
+                                  !std::isnan(rb.pose.position.y) &&
+                                  !std::isnan(rb.pose.position.z);
+            bool valid_orientation = !std::isnan(rb.pose.orientation.x) &&
+                                     !std::isnan(rb.pose.orientation.y) &&
+                                     !std::isnan(rb.pose.orientation.z) &&
+                                     !std::isnan(rb.pose.orientation.w);
+
+            if (valid_position && valid_orientation)
+            {
+              msg_skel.rigidbodies.push_back(rb);
+              pose_array.poses.push_back(rb.pose);
+
+              // Publish TF for each skeleton segment
+              geometry_msgs::msg::TransformStamped tf_msg;
+              tf_msg.header.stamp = msg_skel.header.stamp;
+              tf_msg.header.frame_id = frame_id_;
+              tf_msg.child_frame_id = rb.rigid_body_name;
+              tf_msg.transform.translation.x = rb.pose.position.x;
+              tf_msg.transform.translation.y = rb.pose.position.y;
+              tf_msg.transform.translation.z = rb.pose.position.z;
+              tf_msg.transform.rotation.x = rb.pose.orientation.x;
+              tf_msg.transform.rotation.y = rb.pose.orientation.y;
+              tf_msg.transform.rotation.z = rb.pose.orientation.z;
+              tf_msg.transform.rotation.w = rb.pose.orientation.w;
+              tf_broadcaster_->sendTransform(tf_msg);
+            }
+          }
+        }
+      }
+
+      if (mocap_skeleton_pub_->get_subscription_count() > 0) {
+        mocap_skeleton_pub_->publish(msg_skel);
+      }
+
+      if (skeleton_pose_array_pub_->get_subscription_count() > 0) {
+        skeleton_pose_array_pub_->publish(pose_array);
+      }
+    }
+  }
 }
 
 bool QualisysDriver::stop_qualisys()
@@ -237,6 +331,12 @@ CallbackReturnT QualisysDriver::on_configure(const rclcpp_lifecycle::State &)
   mocap_rigid_bodies_pub_ = create_publisher<mocap4r2_msgs::msg::RigidBodies>(
     "rigid_bodies", rclcpp::QoS(1000));
 
+  mocap_skeleton_pub_ = create_publisher<mocap4r2_msgs::msg::RigidBodies>(
+    "skeleton_segments", rclcpp::QoS(1000));
+
+  skeleton_pose_array_pub_ = create_publisher<geometry_msgs::msg::PoseArray>(
+    "skeleton_poses", rclcpp::QoS(100));
+
   update_pub_ = create_publisher<std_msgs::msg::Empty>(
     "/qualisys_driver/update_notify", qos);
 
@@ -254,6 +354,8 @@ CallbackReturnT QualisysDriver::on_activate(const rclcpp_lifecycle::State &)
   update_pub_->on_activate();
   mocap_markers_pub_->on_activate();
   mocap_rigid_bodies_pub_->on_activate();
+  mocap_skeleton_pub_->on_activate();
+  skeleton_pose_array_pub_->on_activate();
   bool success = connect_qualisys();
 
   if (success) {
@@ -276,6 +378,8 @@ CallbackReturnT QualisysDriver::on_deactivate(const rclcpp_lifecycle::State &)
   update_pub_->on_deactivate();
   mocap_markers_pub_->on_deactivate();
   mocap_rigid_bodies_pub_->on_deactivate();
+  mocap_skeleton_pub_->on_deactivate();
+  skeleton_pose_array_pub_->on_deactivate();
   stop_qualisys();
   RCLCPP_INFO(get_logger(), "Deactivated!\n");
 
@@ -289,6 +393,8 @@ CallbackReturnT QualisysDriver::on_cleanup(const rclcpp_lifecycle::State &)
   update_pub_.reset();
   mocap_markers_pub_.reset();
   mocap_rigid_bodies_pub_.reset();
+  mocap_skeleton_pub_.reset();
+  skeleton_pose_array_pub_.reset();
   timer_->reset();
   RCLCPP_INFO(get_logger(), "Cleaned up!\n");
 
@@ -319,8 +425,9 @@ bool QualisysDriver::connect_qualisys()
     get_logger(),
     "Trying to connect to Qualisys host at %s:%d", host_name_.c_str(), port_);
 
+  // Use protocol version 1.22+ for skeleton support
   if (!port_protocol_.Connect(
-      reinterpret_cast<const char *>(host_name_.data()), port_, 0, 1, 7))
+      reinterpret_cast<const char *>(host_name_.data()), port_, 0, 1, 22))
   {
     RCLCPP_FATAL(get_logger(), "Connection error");
     return false;
@@ -329,6 +436,44 @@ bool QualisysDriver::connect_qualisys()
 
   bool settings_read;
   port_protocol_.Read6DOFSettings(settings_read);
+
+  // Read skeleton settings if enabled
+  skeleton_data_available_ = false;
+  if (enable_skeleton_) {
+    bool skeleton_available;
+    // Pass true for global coordinates
+    port_protocol_.ReadSkeletonSettings(skeleton_available, true);
+
+    if (skeleton_available) {
+      skeleton_data_available_ = true;
+      skeleton_segment_map_.clear();
+      unsigned int skeleton_count = port_protocol_.GetSkeletonCount();
+      RCLCPP_INFO(get_logger(), "Found %d skeleton(s)", skeleton_count);
+
+      for (unsigned int skel_idx = 0; skel_idx < skeleton_count; ++skel_idx) {
+        const char * skeleton_name = port_protocol_.GetSkeletonName(skel_idx);
+        unsigned int segment_count = port_protocol_.GetSkeletonSegmentCount(skel_idx);
+        RCLCPP_INFO(
+          get_logger(), "Skeleton '%s' has %d segments",
+          skeleton_name, segment_count);
+
+        for (unsigned int seg_idx = 0; seg_idx < segment_count; ++seg_idx) {
+          CRTProtocol::SSettingsSkeletonSegment segment;
+          if (port_protocol_.GetSkeletonSegment(skel_idx, seg_idx, &segment)) {
+            SkeletonSegmentInfo info;
+            info.skeleton_name = skeleton_name;
+            info.segment_name = segment.name;
+            skeleton_segment_map_[std::make_pair(skel_idx, segment.id)] = info;
+            RCLCPP_DEBUG(
+              get_logger(), "  Segment %d: id=%d name='%s'",
+              seg_idx, segment.id, segment.name.c_str());
+          }
+        }
+      }
+    } else {
+      RCLCPP_WARN(get_logger(), "No skeleton data available");
+    }
+  }
 
   return settings_read;
 }
@@ -346,6 +491,7 @@ void QualisysDriver::initParameters()
   declare_parameter<bool>("use_markers_with_id", true);
   declare_parameter<int>("publish_rate", 10);
   declare_parameter<std::string>("frame_id", "map");
+  declare_parameter<bool>("enable_skeleton", true);
 
   get_parameter<std::string>("host_name", host_name_);
   get_parameter<int>("port", port_);
@@ -358,6 +504,7 @@ void QualisysDriver::initParameters()
   get_parameter<bool>("use_markers_with_id", use_markers_with_id_);
   get_parameter<int>("publish_rate", publish_rate_);
   get_parameter<std::string>("frame_id", frame_id_);
+  get_parameter<bool>("enable_skeleton", enable_skeleton_);
 
   RCLCPP_INFO(get_logger(), "Param host_name: %s", host_name_.c_str());
   RCLCPP_INFO(get_logger(), "Param port: %d", port_);
@@ -370,4 +517,5 @@ void QualisysDriver::initParameters()
   RCLCPP_INFO(get_logger(), "Param use_markers_with_id: %s", use_markers_with_id_ ? "true" : "false");
   RCLCPP_INFO(get_logger(), "Param publish_rate: %d", publish_rate_);
   RCLCPP_INFO(get_logger(), "Param frame_id: %s", frame_id_.c_str());
+  RCLCPP_INFO(get_logger(), "Param enable_skeleton: %s", enable_skeleton_ ? "true" : "false");
 }

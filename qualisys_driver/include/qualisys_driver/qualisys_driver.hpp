@@ -43,6 +43,7 @@
 #include "mocap4r2_msgs/msg/markers.hpp"
 #include "mocap4r2_msgs/msg/rigid_body.hpp"
 #include "mocap4r2_msgs/msg/rigid_bodies.hpp"
+#include "geometry_msgs/msg/pose_array.hpp"
 
 #include "std_msgs/msg/empty.hpp"
 #include "std_msgs/msg/string.hpp"
@@ -51,6 +52,11 @@
 #include "tf2_ros/transform_broadcaster.h"
 
 #include "RTProtocol.h"
+
+struct SkeletonSegmentInfo {
+  std::string skeleton_name;
+  std::string segment_name;
+};
 
 class QualisysDriver : public rclcpp_lifecycle::LifecycleNode
 {
@@ -103,7 +109,16 @@ private:
   rclcpp_lifecycle::LifecyclePublisher<mocap4r2_msgs::msg::Markers>::SharedPtr mocap_markers_pub_;
   rclcpp_lifecycle::LifecyclePublisher<mocap4r2_msgs::msg::RigidBodies>::SharedPtr
     mocap_rigid_bodies_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<mocap4r2_msgs::msg::RigidBodies>::SharedPtr
+    mocap_skeleton_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::PoseArray>::SharedPtr
+    skeleton_pose_array_pub_;
   rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Empty>::SharedPtr update_pub_;
+
+  bool enable_skeleton_;
+  bool skeleton_data_available_;
+  // Map from (skeleton_index, segment_id) to segment info
+  std::map<std::pair<unsigned int, unsigned int>, SkeletonSegmentInfo> skeleton_segment_map_;
 };
 
 static
