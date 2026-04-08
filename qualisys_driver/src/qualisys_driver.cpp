@@ -79,8 +79,7 @@ void QualisysDriver::loop()
 {
   CRTPacket * prt_packet = port_protocol_.GetRTPacket();
   CRTPacket::EPacketType e_type;
-  port_protocol_.GetCurrentFrame(CRTProtocol::cComponent3d + CRTProtocol::cComponent6d);
-  if (port_protocol_.ReceiveRTPacket(e_type, true)) {
+  if (port_protocol_.Receive(e_type, true) == CNetwork::ResponseType::success) {
     switch (e_type) {
       case CRTPacket::PacketError:
         {
@@ -257,7 +256,14 @@ CallbackReturnT QualisysDriver::on_activate(const rclcpp_lifecycle::State &)
   bool success = connect_qualisys();
 
   if (success) {
-    timer_ = this->create_wall_timer(std::chrono::milliseconds(1000 / publish_rate_), std::bind(&QualisysDriver::loop, this));
+    if (!port_protocol_.StreamFrames(CRTProtocol::RateAllFrames, 0, 0, nullptr,
+        CRTProtocol::cComponent3d + CRTProtocol::cComponent6d))
+    {
+      RCLCPP_ERROR(get_logger(), "Failed to start streaming frames");
+      return CallbackReturnT::FAILURE;
+    }
+    RCLCPP_INFO(get_logger(), "Streaming started");
+    timer_ = this->create_wall_timer(std::chrono::milliseconds(1), std::bind(&QualisysDriver::loop, this));
     RCLCPP_INFO(get_logger(), "Activated!\n");
 
     return CallbackReturnT::SUCCESS;
