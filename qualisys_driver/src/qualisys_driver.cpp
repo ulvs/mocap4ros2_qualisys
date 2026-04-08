@@ -114,7 +114,8 @@ void QualisysDriver::process_packet(CRTPacket * const packet)
 
     if (frame_diff > 1) {
       dropped_frame_count_ += frame_diff;
-      double dropped_frame_pct = static_cast<double>(dropped_frame_count_ / frame_count_ * 100);
+      double dropped_frame_pct = (frame_count_ > 0) ?
+        static_cast<double>(dropped_frame_count_) / frame_count_ * 100.0 : 0.0;
 
       RCLCPP_DEBUG(
         get_logger(),
