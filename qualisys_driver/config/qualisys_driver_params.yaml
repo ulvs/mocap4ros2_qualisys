@@ -1,6 +1,6 @@
 qualisys_driver_node:
   ros__parameters:
-    host_name: "192.168.1.64"
+    host_name: "mocap"
     host_port: 22222
     udp_port: 0                            # 0 = TCP, any other value = UDP on that port
     frame_count: 0
@@ -12,3 +12,4 @@ qualisys_driver_node:
     qos_depth: 10                         # 10 / 100 / 1000
     publish_rate: 10
     frame_id: "qualisys"
+    enable_skeleton: true
