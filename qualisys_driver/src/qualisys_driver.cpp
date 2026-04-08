@@ -362,7 +362,8 @@ CallbackReturnT QualisysDriver::on_activate(const rclcpp_lifecycle::State &)
     if (!port_protocol_.StreamFrames(CRTProtocol::RateAllFrames, 0, udp_port_, nullptr,
         components, options))
     {
-      RCLCPP_ERROR(get_logger(), "Failed to start streaming frames");
+      RCLCPP_ERROR(get_logger(), "Failed to start streaming frames: %s",
+        port_protocol_.GetErrorString());
       return CallbackReturnT::FAILURE;
     }
     RCLCPP_INFO(get_logger(), "Streaming started");
