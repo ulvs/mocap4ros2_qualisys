@@ -344,7 +344,8 @@ void QualisysDriver::initParameters()
   declare_parameter<std::string>("host_name", "mocap");
   declare_parameter<int>("port", 22222);
   // UDP port for streaming data. 0 = use TCP, any other value = use UDP on that port.
-  declare_parameter<int>("udp_port", 6734);
+  // Note: UDP may not work in WSL2 due to NAT limitations.
+  declare_parameter<int>("udp_port", 0);
   declare_parameter<int>("last_frame_number", 0);
   declare_parameter<int>("frame_count", 0);
   declare_parameter<int>("dropped_frame_count", 0);
