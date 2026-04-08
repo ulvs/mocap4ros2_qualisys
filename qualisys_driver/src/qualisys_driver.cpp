@@ -362,7 +362,7 @@ CallbackReturnT QualisysDriver::on_activate(const rclcpp_lifecycle::State &)
     if (!port_protocol_.StreamFrames(CRTProtocol::RateAllFrames, 0, udp_port_, nullptr,
         components, options))
     {
-      RCLCPP_ERROR(get_logger(), "Failed to start streaming frames: %s",
+      RCLCPP_ERROR(get_logger(), "Failed to start streaming frames: '%s'",
         port_protocol_.GetErrorString());
       return CallbackReturnT::FAILURE;
     }
@@ -442,14 +442,16 @@ bool QualisysDriver::connect_qualisys()
   }
   RCLCPP_INFO(get_logger(), "Connected");
 
-  bool settings_read;
-  port_protocol_.Read6DOFSettings(settings_read);
+  bool settings_6dof;
+  port_protocol_.Read6DOFSettings(settings_6dof);
+  if (!settings_6dof) {
+    RCLCPP_WARN(get_logger(), "Could not read 6DOF settings");
+  }
 
   // Read skeleton settings if enabled
   skeleton_data_available_ = false;
   if (enable_skeleton_) {
     bool skeleton_available;
-    // Pass true for global coordinates
     port_protocol_.ReadSkeletonSettings(skeleton_available, true);
 
     if (skeleton_available) {
@@ -483,7 +485,8 @@ bool QualisysDriver::connect_qualisys()
     }
   }
 
-  return settings_read;
+  // Succeed if either 6DOF or skeleton settings were read
+  return settings_6dof || skeleton_data_available_;
 }
 
 void QualisysDriver::initParameters()
