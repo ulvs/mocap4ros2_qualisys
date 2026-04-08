@@ -256,7 +256,7 @@ CallbackReturnT QualisysDriver::on_activate(const rclcpp_lifecycle::State &)
   bool success = connect_qualisys();
 
   if (success) {
-    if (!port_protocol_.StreamFrames(CRTProtocol::RateAllFrames, 0, 0, nullptr,
+    if (!port_protocol_.StreamFrames(CRTProtocol::RateAllFrames, 0, 6734, nullptr,
         CRTProtocol::cComponent3d + CRTProtocol::cComponent6d))
     {
       RCLCPP_ERROR(get_logger(), "Failed to start streaming frames");
