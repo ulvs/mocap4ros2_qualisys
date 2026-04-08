@@ -256,7 +256,7 @@ CallbackReturnT QualisysDriver::on_activate(const rclcpp_lifecycle::State &)
   bool success = connect_qualisys();
 
   if (success) {
-    if (!port_protocol_.StreamFrames(CRTProtocol::RateAllFrames, 0, 6734, nullptr,
+    if (!port_protocol_.StreamFrames(CRTProtocol::RateAllFrames, 0, udp_port_, nullptr,
         CRTProtocol::cComponent3d + CRTProtocol::cComponent6d))
     {
       RCLCPP_ERROR(get_logger(), "Failed to start streaming frames");
@@ -343,6 +343,8 @@ void QualisysDriver::initParameters()
 {
   declare_parameter<std::string>("host_name", "mocap");
   declare_parameter<int>("port", 22222);
+  // UDP port for streaming data. 0 = use TCP, any other value = use UDP on that port.
+  declare_parameter<int>("udp_port", 6734);
   declare_parameter<int>("last_frame_number", 0);
   declare_parameter<int>("frame_count", 0);
   declare_parameter<int>("dropped_frame_count", 0);
@@ -355,6 +357,7 @@ void QualisysDriver::initParameters()
 
   get_parameter<std::string>("host_name", host_name_);
   get_parameter<int>("port", port_);
+  get_parameter<int>("udp_port", udp_port_);
   get_parameter<int>("last_frame_number", last_frame_number_);
   get_parameter<int>("frame_count", frame_count_);
   get_parameter<int>("dropped_frame_count", dropped_frame_count_);
@@ -367,6 +370,7 @@ void QualisysDriver::initParameters()
 
   RCLCPP_INFO(get_logger(), "Param host_name: %s", host_name_.c_str());
   RCLCPP_INFO(get_logger(), "Param port: %d", port_);
+  RCLCPP_INFO(get_logger(), "Param udp_port: %d (0 = TCP, >0 = UDP)", udp_port_);
   RCLCPP_INFO(get_logger(), "Param last_frame_number: %d", last_frame_number_);
   RCLCPP_INFO(get_logger(), "Param frame_count: %d", frame_count_);
   RCLCPP_INFO(get_logger(), "Param dropped_frame_count: %d", dropped_frame_count_);

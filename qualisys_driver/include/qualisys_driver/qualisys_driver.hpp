@@ -87,6 +87,7 @@ private:
   CRTProtocol port_protocol_;
   std::string host_name_;
   int port_;
+  int udp_port_;
   std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::string qos_history_policy_;
   std::string qos_reliability_policy_;
